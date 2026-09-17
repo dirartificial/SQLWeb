@@ -33,6 +33,7 @@ interface DatabaseContextType {
   lastSaved: Date | null;
   initError: string | null;
   tables: string[];
+  dbVersion: number;
   refreshTables: () => void;
   exec: (sql: string) => ExecutionResult;
   getTableInfo: (tableName: string) => TableDefinition | null;
@@ -62,8 +63,13 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const [tables, setTables] = useState<string[]>([]);
+  const [dbVersion, setDbVersion] = useState<number>(0);
 
   const saveTimeoutRef = useRef<number | null>(null);
+
+  const notifyDataChange = useCallback(() => {
+    setDbVersion((v) => v + 1);
+  }, []);
 
   const refreshTables = useCallback(() => {
     if (db) {
@@ -150,15 +156,16 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const result = runQuery(db, sql);
       refreshTables();
 
-      // Si la consulta modificó filas o alteró el esquema, disparar autoguardado
+      // Si la consulta modificó filas o alteró el esquema, disparar autoguardado y notificación
       const isMutating = /^\s*(CREATE|DROP|ALTER|INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql);
       if (result.success && isMutating) {
+        notifyDataChange();
         scheduleAutoSave();
       }
 
       return result;
     },
-    [db, refreshTables, scheduleAutoSave]
+    [db, refreshTables, notifyDataChange, scheduleAutoSave]
   );
 
   const getTableInfo = useCallback(
@@ -166,7 +173,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!db) return null;
       return getTableMetadata(db, tableName);
     },
-    [db]
+    [db, dbVersion]
   );
 
   const getTableDdl = useCallback(
@@ -174,7 +181,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!db) return null;
       return getTableSql(db, tableName);
     },
-    [db]
+    [db, dbVersion]
   );
 
   const createTable = useCallback(
@@ -186,11 +193,12 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const res = runQuery(db, sql);
       if (res.success) {
         refreshTables();
+        notifyDataChange();
         scheduleAutoSave();
       }
       return res;
     },
-    [db, refreshTables, scheduleAutoSave]
+    [db, refreshTables, notifyDataChange, scheduleAutoSave]
   );
 
   const deleteTable = useCallback(
@@ -201,11 +209,12 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const res = dropTable(db, tableName);
       if (res.success) {
         refreshTables();
+        notifyDataChange();
         scheduleAutoSave();
       }
       return res;
     },
-    [db, refreshTables, scheduleAutoSave]
+    [db, refreshTables, notifyDataChange, scheduleAutoSave]
   );
 
   const addNewColumn = useCallback(
@@ -216,11 +225,12 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const res = addColumn(db, tableName, col);
       if (res.success) {
         refreshTables();
+        notifyDataChange();
         scheduleAutoSave();
       }
       return res;
     },
-    [db, refreshTables, scheduleAutoSave]
+    [db, refreshTables, notifyDataChange, scheduleAutoSave]
   );
 
   const getTableData = useCallback(
@@ -228,7 +238,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!db) return { columns: [], rows: [] };
       return getTableRows(db, tableName);
     },
-    [db]
+    [db, dbVersion]
   );
 
   const getTableFkOptions = useCallback(
@@ -236,7 +246,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!db) return [];
       return getForeignKeyOptions(db, targetTable, targetCol);
     },
-    [db]
+    [db, dbVersion]
   );
 
   const insertRow = useCallback(
@@ -250,11 +260,12 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       const res = insertRecord(db, tableName, data, tableInfo.columns);
       if (res.success) {
+        notifyDataChange();
         scheduleAutoSave();
       }
       return res;
     },
-    [db, scheduleAutoSave]
+    [db, notifyDataChange, scheduleAutoSave]
   );
 
   const updateRow = useCallback(
@@ -268,11 +279,12 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       const res = updateRecord(db, tableName, data, tableInfo.columns, pkValues);
       if (res.success) {
+        notifyDataChange();
         scheduleAutoSave();
       }
       return res;
     },
-    [db, scheduleAutoSave]
+    [db, notifyDataChange, scheduleAutoSave]
   );
 
   const deleteRow = useCallback(
@@ -286,11 +298,12 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       const res = deleteRecord(db, tableName, tableInfo.columns, pkValues);
       if (res.success) {
+        notifyDataChange();
         scheduleAutoSave();
       }
       return res;
     },
-    [db, scheduleAutoSave]
+    [db, notifyDataChange, scheduleAutoSave]
   );
 
   // Guardar manualmente ahora
@@ -344,6 +357,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setDb(newDb);
         const loadedTables = getUserTables(newDb);
         setTables(loadedTables);
+        notifyDataChange();
         await persistToStorage(newDb);
         setIsLoading(false);
 
@@ -360,7 +374,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         };
       }
     },
-    [db, persistToStorage]
+    [db, notifyDataChange, persistToStorage]
   );
 
   // Reiniciar base de datos en memoria y limpiar IndexedDB
@@ -379,13 +393,14 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const newDb = await createDatabaseInstance();
       setDb(newDb);
       setTables([]);
+      notifyDataChange();
       setIsLoading(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setInitError(`Error al reiniciar la base: ${msg}`);
       setIsLoading(false);
     }
-  }, [db]);
+  }, [db, notifyDataChange]);
 
   const exportDatabase = useCallback((): Uint8Array | null => {
     if (!db) return null;
@@ -401,6 +416,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       lastSaved,
       initError,
       tables,
+      dbVersion,
       refreshTables,
       exec,
       getTableInfo,
@@ -427,6 +443,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       lastSaved,
       initError,
       tables,
+      dbVersion,
       refreshTables,
       exec,
       getTableInfo,
