@@ -85,9 +85,11 @@ Dos niveles, igual que LO Base separa "asistente de consultas" de "vista SQL":
 
 **4.3.1 Constructor visual (opcional/fase 2)**:
 - Elegir tabla o combinación simple de 2 tablas (join por FK detectada automáticamente).
-- Elegir columnas a mostrar.
-- Agregar un filtro simple (columna + operador + valor).
-- Genera el `SELECT` correspondiente y lo muestra antes de ejecutar.
+- Elegir columnas a mostrar y modificar su orden de proyección (subir/bajar posición en el SELECT).
+- Aplicar funciones de agregación (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`) sobre las columnas proyectadas.
+- Inclusión automática o configurable de la cláusula `GROUP BY` cuando se emplean funciones de agregación.
+- Agregar filtros sobre filas (`WHERE`) y filtros sobre resultados agrupados (`HAVING`).
+- Genera el `SELECT` correspondiente en tiempo real y permite ejecutarlo o transferirlo al Editor SQL.
 
 **4.3.2 Editor SQL directo**:
 - Textarea/CodeMirror con SQL libre.
@@ -137,6 +139,7 @@ Si se quiere un dashboard tipo el del sistema de quizzes (ver progreso de cada a
 
 - **Diseñador de entidades**: se puede crear una tabla con PK y al menos una FK hacia otra tabla ya creada, y el DDL generado es válido SQL SQLite.
 - **Formularios**: insertar un registro respeta tipos y NOT NULL; una FK inválida muestra error legible, no un error crudo de SQLite sin contexto.
+- **Constructor visual / Query builder**: se puede seleccionar el orden de las columnas proyectadas, aplicar funciones de agregación (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`), generar la cláusula `GROUP BY` y aplicar filtros mediante la cláusula `HAVING`.
 - **Editor SQL**: un SELECT con JOIN entre dos tablas creadas por el alumno devuelve resultados correctos.
 - **Informes**: un informe agrupado por una columna muestra totales correctos y se puede exportar a PDF legible.
 - **Responsive**: todo el flujo de alta de entidad y carga de datos se completa sin zoom ni scroll horizontal en una pantalla de 375px de ancho.

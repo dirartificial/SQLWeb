@@ -15,12 +15,32 @@ import {
   Link as LinkIcon,
   Sparkles,
   Database,
-  ArrowRight
+  ArrowRight,
+  ChevronUp,
+  ChevronDown,
+  Layers,
+  Calculator
 } from 'lucide-react';
 
-interface FilterCondition {
+export type AggregateFunc = 'NONE' | 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
+
+export interface ProjectedColumn {
+  id: string;
+  column: string; // ej. "productos.precio" o "*"
+  aggregate: AggregateFunc;
+  alias?: string;
+}
+
+export interface FilterCondition {
   id: string;
   column: string;
+  operator: '=' | '!=' | '>' | '<' | '>=' | '<=' | 'LIKE' | 'IS NULL' | 'IS NOT NULL';
+  value: string;
+}
+
+export interface HavingCondition {
+  id: string;
+  expression: string;
   operator: '=' | '!=' | '>' | '<' | '>=' | '<=' | 'LIKE' | 'IS NULL' | 'IS NOT NULL';
   value: string;
 }
@@ -39,15 +59,21 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
   const [primaryTable, setPrimaryTable] = useState<string>(tables[0] || '');
   const [enableJoin, setEnableJoin] = useState<boolean>(false);
   const [joinFkIndex, setJoinFkIndex] = useState<number>(0);
-  const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
+
+  // Columnas a proyectar con orden y funciones de agregación
+  const [projectedColumns, setProjectedColumns] = useState<ProjectedColumn[]>([]);
+  // Condiciones WHERE
   const [filters, setFilters] = useState<FilterCondition[]>([]);
+  // Condiciones HAVING
+  const [havingConditions, setHavingConditions] = useState<HavingCondition[]>([]);
+
   const [orderByColumn, setOrderByColumn] = useState<string>('');
   const [orderDirection, setOrderDirection] = useState<'ASC' | 'DESC'>('ASC');
   const [limit, setLimit] = useState<number>(20);
 
   const [result, setResult] = useState<ExecutionResult | null>(null);
 
-  // Sincronizar tabla si cambia la lista
+  // Sincronizar tabla principal si cambia la lista global
   useEffect(() => {
     if (!primaryTable && tables.length > 0) {
       setPrimaryTable(tables[0]);
@@ -60,9 +86,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
     return getTableInfo(primaryTable);
   }, [primaryTable, getTableInfo]);
 
-  // Detectar relaciones FK disponibles para JOIN
-  // 1. Relaciones donde primaryTable tiene FK hacia otra tabla
-  // 2. Relaciones donde otra tabla tiene FK hacia primaryTable
+  // Detectar relaciones FK disponibles para INNER JOIN
   const availableJoins = useMemo(() => {
     if (!primaryTable || !primaryMeta) return [];
 
@@ -123,7 +147,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
     return getTableInfo(secondaryTable);
   }, [secondaryTable, getTableInfo]);
 
-  // Columnas disponibles (de la tabla principal + secundaria si hay JOIN)
+  // Lista de todas las columnas disponibles (tabla principal + secundaria si hay JOIN)
   const availableColumns = useMemo(() => {
     const list: { fullName: string; shortName: string; table: string }[] = [];
     if (primaryMeta) {
@@ -147,29 +171,214 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
     return list;
   }, [primaryMeta, primaryTable, enableJoin, secondaryMeta, secondaryTable]);
 
-  // Al cambiar de tabla principal, resetear selección de columnas y filtros
+  // Al cambiar de tabla principal, inicializar proyectadas y resetear filtros/having
   useEffect(() => {
     if (primaryMeta) {
-      setSelectedColumns(primaryMeta.columns.map((c) => `${primaryTable}.${c.name}`));
+      const initialProj: ProjectedColumn[] = primaryMeta.columns.map((c) => ({
+        id: Math.random().toString(36).substring(2, 9),
+        column: `${primaryTable}.${c.name}`,
+        aggregate: 'NONE',
+      }));
+      setProjectedColumns(initialProj);
       setOrderByColumn(primaryMeta.columns[0] ? `${primaryTable}.${primaryMeta.columns[0].name}` : '');
+    } else {
+      setProjectedColumns([]);
+      setOrderByColumn('');
     }
     setEnableJoin(false);
     setJoinFkIndex(0);
     setFilters([]);
+    setHavingConditions([]);
     setResult(null);
   }, [primaryTable, primaryMeta]);
 
-  // Generar la sentencia SQL reactiva
+  // Alternar selección de una columna disponible (agregar o quitar)
+  const handleToggleAvailableColumn = (colFullName: string) => {
+    setProjectedColumns((prev) => {
+      const exists = prev.some((item) => item.column === colFullName);
+      if (exists) {
+        return prev.filter((item) => item.column !== colFullName);
+      } else {
+        return [
+          ...prev,
+          {
+            id: Math.random().toString(36).substring(2, 9),
+            column: colFullName,
+            aggregate: 'NONE',
+          },
+        ];
+      }
+    });
+  };
+
+  // Reordenar columnas proyectadas (subir posición)
+  const handleMoveColumnUp = (index: number) => {
+    if (index <= 0) return;
+    setProjectedColumns((prev) => {
+      const next = [...prev];
+      const temp = next[index];
+      next[index] = next[index - 1];
+      next[index - 1] = temp;
+      return next;
+    });
+  };
+
+  // Reordenar columnas proyectadas (bajar posición)
+  const handleMoveColumnDown = (index: number) => {
+    setProjectedColumns((prev) => {
+      if (index >= prev.length - 1) return prev;
+      const next = [...prev];
+      const temp = next[index];
+      next[index] = next[index + 1];
+      next[index + 1] = temp;
+      return next;
+    });
+  };
+
+  // Eliminar una columna proyectada
+  const handleRemoveProjectedColumn = (id: string) => {
+    setProjectedColumns((prev) => prev.filter((col) => col.id !== id));
+  };
+
+  // Actualizar función de agregación o alias de una columna proyectada
+  const handleUpdateProjectedColumn = (
+    id: string,
+    field: 'aggregate' | 'alias',
+    val: string
+  ) => {
+    setProjectedColumns((prev) =>
+      prev.map((col) => (col.id === id ? { ...col, [field]: val } : col))
+    );
+  };
+
+  // Agregar un item especial COUNT(*)
+  const handleAddCountStar = () => {
+    setProjectedColumns((prev) => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        column: '*',
+        aggregate: 'COUNT',
+        alias: 'total_registros',
+      },
+    ]);
+  };
+
+  // Agregar filtro WHERE
+  const handleAddFilter = () => {
+    const firstCol = availableColumns[0]?.fullName || '';
+    setFilters((prev) => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        column: firstCol,
+        operator: '=',
+        value: '',
+      },
+    ]);
+  };
+
+  const handleRemoveFilter = (id: string) => {
+    setFilters((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  const handleUpdateFilter = (id: string, field: keyof FilterCondition, val: any) => {
+    setFilters((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, [field]: val } : f))
+    );
+  };
+
+  // Agregar condición HAVING
+  const handleAddHavingCondition = () => {
+    // Buscar la primera expresión agregada proyectada o armar una por defecto
+    const aggProj = projectedColumns.find((c) => c.aggregate !== 'NONE');
+    let defaultExpr = '';
+    if (aggProj) {
+      defaultExpr = aggProj.column === '*' ? 'COUNT(*)' : `${aggProj.aggregate}(${aggProj.column})`;
+    } else if (availableColumns.length > 0) {
+      defaultExpr = `COUNT(${availableColumns[0].fullName})`;
+    } else {
+      defaultExpr = 'COUNT(*)';
+    }
+
+    setHavingConditions((prev) => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        expression: defaultExpr,
+        operator: '>',
+        value: '0',
+      },
+    ]);
+  };
+
+  const handleRemoveHavingCondition = (id: string) => {
+    setHavingConditions((prev) => prev.filter((h) => h.id !== id));
+  };
+
+  const handleUpdateHavingCondition = (id: string, field: keyof HavingCondition, val: any) => {
+    setHavingConditions((prev) =>
+      prev.map((h) => (h.id === id ? { ...h, [field]: val } : h))
+    );
+  };
+
+  // Determinar si hay alguna función de agregación en uso
+  const hasAggregates = useMemo(() => {
+    return projectedColumns.some((c) => c.aggregate !== 'NONE');
+  }, [projectedColumns]);
+
+  // Columnas no agregadas (para GROUP BY automático)
+  const nonAggregatedCols = useMemo(() => {
+    return projectedColumns
+      .filter((c) => c.aggregate === 'NONE' && c.column !== '*')
+      .map((c) => c.column);
+  }, [projectedColumns]);
+
+  // Expresiones agregadas disponibles para selector HAVING u ORDER BY
+  const availableAggregateExpressions = useMemo(() => {
+    const exprs: string[] = ['COUNT(*)'];
+    for (const col of availableColumns) {
+      exprs.push(`COUNT(${col.fullName})`);
+      exprs.push(`SUM(${col.fullName})`);
+      exprs.push(`AVG(${col.fullName})`);
+      exprs.push(`MIN(${col.fullName})`);
+      exprs.push(`MAX(${col.fullName})`);
+    }
+    return exprs;
+  }, [availableColumns]);
+
+  // Generar sentencia SQL reactiva
   const generatedSql = useMemo(() => {
     if (!primaryTable) return '';
 
     // SELECT
-    const colsClause =
-      selectedColumns.length > 0 ? selectedColumns.map((c) => `  ${c}`).join(',\n') : `  ${primaryTable}.*`;
+    let colsClause = '';
+    if (projectedColumns.length === 0) {
+      colsClause = `  ${primaryTable}.*`;
+    } else {
+      colsClause = projectedColumns
+        .map((item) => {
+          let expr = '';
+          if (item.column === '*') {
+            expr = item.aggregate === 'NONE' ? '*' : `${item.aggregate}(*)`;
+          } else if (item.aggregate === 'NONE') {
+            expr = item.column;
+          } else {
+            expr = `${item.aggregate}(${item.column})`;
+          }
+
+          if (item.alias && item.alias.trim() !== '') {
+            const cleanAlias = item.alias.trim().replace(/"/g, '""');
+            expr += ` AS "${cleanAlias}"`;
+          }
+          return `  ${expr}`;
+        })
+        .join(',\n');
+    }
 
     let sql = `SELECT\n${colsClause}\nFROM "${primaryTable}"`;
 
-    // JOIN
+    // INNER JOIN
     if (enableJoin && activeJoin && secondaryTable) {
       if (activeJoin.type === 'outgoing') {
         sql += `\nINNER JOIN "${secondaryTable}" ON ${primaryTable}.${activeJoin.fromCol} = ${secondaryTable}.${activeJoin.toCol}`;
@@ -179,7 +388,9 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
     }
 
     // WHERE
-    const validFilters = filters.filter((f) => f.column && (['IS NULL', 'IS NOT NULL'].includes(f.operator) || f.value.trim() !== ''));
+    const validFilters = filters.filter(
+      (f) => f.column && (['IS NULL', 'IS NOT NULL'].includes(f.operator) || f.value.trim() !== '')
+    );
     if (validFilters.length > 0) {
       const whereClauses = validFilters.map((f) => {
         if (f.operator === 'IS NULL' || f.operator === 'IS NOT NULL') {
@@ -188,12 +399,36 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
         if (f.operator === 'LIKE') {
           return `${f.column} LIKE '%${f.value.replace(/'/g, "''")}%'`;
         }
-        // Determinar si el valor es numérico o texto
         const isNumeric = !isNaN(Number(f.value)) && f.value.trim() !== '';
         const formattedVal = isNumeric ? f.value.trim() : `'${f.value.replace(/'/g, "''")}'`;
         return `${f.column} ${f.operator} ${formattedVal}`;
       });
       sql += `\nWHERE ${whereClauses.join(' AND ')}`;
+    }
+
+    // GROUP BY (automático cuando hay funciones de agregación)
+    if (hasAggregates && nonAggregatedCols.length > 0) {
+      const uniqueGroupCols = Array.from(new Set(nonAggregatedCols));
+      sql += `\nGROUP BY ${uniqueGroupCols.join(', ')}`;
+    }
+
+    // HAVING
+    const validHaving = havingConditions.filter(
+      (h) => h.expression && (['IS NULL', 'IS NOT NULL'].includes(h.operator) || h.value.trim() !== '')
+    );
+    if (validHaving.length > 0) {
+      const havingClauses = validHaving.map((h) => {
+        if (h.operator === 'IS NULL' || h.operator === 'IS NOT NULL') {
+          return `${h.expression} ${h.operator}`;
+        }
+        if (h.operator === 'LIKE') {
+          return `${h.expression} LIKE '%${h.value.replace(/'/g, "''")}%'`;
+        }
+        const isNumeric = !isNaN(Number(h.value)) && h.value.trim() !== '';
+        const formattedVal = isNumeric ? h.value.trim() : `'${h.value.replace(/'/g, "''")}'`;
+        return `${h.expression} ${h.operator} ${formattedVal}`;
+      });
+      sql += `\nHAVING ${havingClauses.join(' AND ')}`;
     }
 
     // ORDER BY
@@ -211,11 +446,14 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
     return sql;
   }, [
     primaryTable,
-    selectedColumns,
+    projectedColumns,
     enableJoin,
     activeJoin,
     secondaryTable,
     filters,
+    hasAggregates,
+    nonAggregatedCols,
+    havingConditions,
     orderByColumn,
     orderDirection,
     limit,
@@ -226,41 +464,6 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
     if (!generatedSql || !isReady || isLoading) return;
     const res = exec(generatedSql);
     setResult(res);
-  };
-
-  // Agregar filtro
-  const handleAddFilter = () => {
-    const firstCol = availableColumns[0]?.fullName || '';
-    setFilters((prev) => [
-      ...prev,
-      {
-        id: Math.random().toString(36).substring(2, 9),
-        column: firstCol,
-        operator: '=',
-        value: '',
-      },
-    ]);
-  };
-
-  // Eliminar filtro
-  const handleRemoveFilter = (id: string) => {
-    setFilters((prev) => prev.filter((f) => f.id !== id));
-  };
-
-  // Actualizar filtro
-  const handleUpdateFilter = (id: string, field: keyof FilterCondition, val: any) => {
-    setFilters((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, [field]: val } : f))
-    );
-  };
-
-  // Toggle de columnas
-  const handleToggleColumn = (colFullName: string) => {
-    setSelectedColumns((prev) =>
-      prev.includes(colFullName)
-        ? prev.filter((c) => c !== colFullName)
-        : [...prev, colFullName]
-    );
   };
 
   if (tables.length === 0) {
@@ -300,7 +503,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
             Asistente Visual de Consultas (Query Builder)
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Diseña consultas de forma guiada seleccionando tablas, relaciones JOIN y condiciones WHERE sin escribir SQL.
+            Diseña consultas visualmente: ordena columnas, aplica funciones de agregación (COUNT, SUM, AVG...), configura GROUP BY y filtra con WHERE y HAVING.
           </p>
         </div>
 
@@ -316,7 +519,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
 
           <button
             onClick={handleExecute}
-            disabled={!isReady || isLoading || selectedColumns.length === 0}
+            disabled={!isReady || isLoading || projectedColumns.length === 0}
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-semibold rounded-xl shadow-sm transition-all active:scale-95 disabled:opacity-50"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
@@ -325,7 +528,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
         </div>
       </div>
 
-      {/* Asistente por Bloques */}
+      {/* Bloques de Configuración */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {/* BLOQUE 1: TABLA PRINCIPAL Y COMBINACIÓN JOIN */}
         <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4 text-xs">
@@ -391,52 +594,173 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
           )}
         </div>
 
-        {/* BLOQUE 2: COLUMNAS A MOSTRAR */}
-        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4 text-xs">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+        {/* BLOQUE 2: COLUMNAS A PROYECTAR, REORDENAMIENTO Y FUNCIONES DE AGREGACIÓN */}
+        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4 text-xs md:col-span-2">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2 flex-wrap gap-2">
             <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
               <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs">2</span>
-              <span>Columnas a Proyectar (SELECT)</span>
+              <Calculator className="w-4 h-4 text-blue-600" />
+              <span>Columnas a Proyectar, Orden y Agregaciones (SELECT)</span>
             </h3>
 
-            <div className="flex items-center gap-2 text-[11px] text-blue-600">
+            <div className="flex items-center gap-2 text-[11px]">
               <button
                 type="button"
-                onClick={() => setSelectedColumns(availableColumns.map((c) => c.fullName))}
-                className="hover:underline"
+                onClick={handleAddCountStar}
+                className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold border border-amber-200 rounded-lg flex items-center gap-1 transition-colors"
+                title="Agregar conteo global de registros COUNT(*)"
+              >
+                <Plus className="w-3 h-3" />
+                <span>+ COUNT(*)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const allProj: ProjectedColumn[] = availableColumns.map((c) => ({
+                    id: Math.random().toString(36).substring(2, 9),
+                    column: c.fullName,
+                    aggregate: 'NONE',
+                  }));
+                  setProjectedColumns(allProj);
+                }}
+                className="text-blue-600 hover:underline font-semibold"
               >
                 Todas
               </button>
-              <span>•</span>
+              <span className="text-slate-300">•</span>
               <button
                 type="button"
-                onClick={() => setSelectedColumns([])}
-                className="hover:underline"
+                onClick={() => setProjectedColumns([])}
+                className="text-blue-600 hover:underline font-semibold"
               >
                 Ninguna
               </button>
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto custom-scrollbar p-1">
-            {availableColumns.map((col) => {
-              const isSelected = selectedColumns.includes(col.fullName);
-              return (
-                <button
-                  key={col.fullName}
-                  type="button"
-                  onClick={() => handleToggleColumn(col.fullName)}
-                  className={`px-2.5 py-1.5 rounded-lg border text-xs font-mono transition-all flex items-center gap-1.5 ${
-                    isSelected
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                  }`}
-                >
-                  <span className="text-[10px] opacity-75">{col.table}.</span>
-                  <span className="font-semibold">{col.shortName}</span>
-                </button>
-              );
-            })}
+          {/* Chips para agregar/quitar columnas disponibles */}
+          <div>
+            <span className="text-[11px] font-semibold text-slate-500 block mb-1.5">
+              Haz clic en las columnas disponibles para incluir o quitar de la lista proyectada:
+            </span>
+            <div className="flex flex-wrap gap-1.5 p-1 bg-slate-50 rounded-xl border border-slate-200 max-h-32 overflow-y-auto custom-scrollbar">
+              {availableColumns.map((col) => {
+                const isSelected = projectedColumns.some((p) => p.column === col.fullName);
+                return (
+                  <button
+                    key={col.fullName}
+                    type="button"
+                    onClick={() => handleToggleAvailableColumn(col.fullName)}
+                    className={`px-2 py-1 rounded-lg border text-xs font-mono transition-all flex items-center gap-1 ${
+                      isSelected
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span className="text-[10px] opacity-75">{col.table}.</span>
+                    <span className="font-semibold">{col.shortName}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Lista de Columnas Proyectadas (con Reordenamiento, Agregación y Alias) */}
+          <div className="space-y-2">
+            <span className="text-[11px] font-semibold text-slate-700 block">
+              Lista ordenada de columnas en el SELECT (utiliza los botones de subir/bajar para cambiar la secuencia):
+            </span>
+
+            {projectedColumns.length === 0 ? (
+              <p className="text-slate-400 py-4 text-center italic border border-dashed border-slate-200 rounded-xl">
+                No hay columnas seleccionadas. Selecciona al menos una columna o haz clic en + COUNT(*).
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
+                {projectedColumns.map((col, index) => (
+                  <div
+                    key={col.id}
+                    className="flex items-center gap-2 p-2 bg-white rounded-xl border border-slate-200 shadow-2xs flex-wrap sm:flex-nowrap"
+                  >
+                    {/* Número de posición & Botones de reordenamiento */}
+                    <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200">
+                      <span className="font-bold text-slate-600 text-xs w-4 text-center">
+                        {index + 1}
+                      </span>
+                      <div className="flex flex-col">
+                        <button
+                          type="button"
+                          onClick={() => handleMoveColumnUp(index)}
+                          disabled={index === 0}
+                          className="text-slate-500 hover:text-blue-600 disabled:opacity-20 p-0.5"
+                          title="Subir posición (mostrar antes)"
+                        >
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleMoveColumnDown(index)}
+                          disabled={index === projectedColumns.length - 1}
+                          className="text-slate-500 hover:text-blue-600 disabled:opacity-20 p-0.5"
+                          title="Bajar posición (mostrar después)"
+                        >
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Nombre de Columna */}
+                    <div className="font-mono text-xs font-semibold text-slate-800 min-w-[130px] flex-1 truncate">
+                      {col.column}
+                    </div>
+
+                    {/* Selector de Función de Agregación */}
+                    <div className="flex items-center gap-1 min-w-[140px]">
+                      <select
+                        value={col.aggregate}
+                        onChange={(e) =>
+                          handleUpdateProjectedColumn(col.id, 'aggregate', e.target.value as AggregateFunc)
+                        }
+                        className={`w-full px-2 py-1 border rounded-lg text-xs font-semibold font-mono ${
+                          col.aggregate !== 'NONE'
+                            ? 'bg-amber-50 text-amber-800 border-amber-300 font-bold'
+                            : 'bg-slate-50 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        <option value="NONE">Sin agregación</option>
+                        <option value="COUNT">COUNT (conteo)</option>
+                        <option value="SUM">SUM (suma)</option>
+                        <option value="AVG">AVG (promedio)</option>
+                        <option value="MIN">MIN (mínimo)</option>
+                        <option value="MAX">MAX (máximo)</option>
+                      </select>
+                    </div>
+
+                    {/* Alias opcional (AS) */}
+                    <div className="flex items-center gap-1 min-w-[120px]">
+                      <span className="text-slate-400 font-mono text-[10px]">AS</span>
+                      <input
+                        type="text"
+                        value={col.alias || ''}
+                        onChange={(e) => handleUpdateProjectedColumn(col.id, 'alias', e.target.value)}
+                        placeholder="Alias opcional..."
+                        className="w-full px-2 py-1 border border-slate-200 rounded-lg text-xs font-mono bg-slate-50 focus:bg-white"
+                      />
+                    </div>
+
+                    {/* Botón Eliminar */}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveProjectedColumn(col.id)}
+                      className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors"
+                      title="Quitar de la proyección"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -461,7 +785,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
 
           {filters.length === 0 ? (
             <p className="text-slate-400 py-3 text-center italic">
-              Sin condiciones. Se mostrarán todos los registros de la tabla.
+              Sin condiciones WHERE. Se evaluarán todas las filas.
             </p>
           ) : (
             <div className="space-y-2 max-h-44 overflow-y-auto custom-scrollbar pr-1">
@@ -519,16 +843,128 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
           )}
         </div>
 
-        {/* BLOQUE 4: ORDENAMIENTO Y LÍMITE */}
+        {/* BLOQUE 4: AGRUPAMIENTO Y CLÁUSULA HAVING */}
         <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4 text-xs">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs">4</span>
+              <Layers className="w-4 h-4 text-blue-600" />
+              <span>Agrupamiento y Cláusula HAVING</span>
+            </h3>
+
+            <button
+              type="button"
+              onClick={handleAddHavingCondition}
+              className="inline-flex items-center gap-1 text-amber-700 hover:text-amber-900 font-semibold"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Agregar HAVING</span>
+            </button>
+          </div>
+
+          {/* Banner explicativo de GROUP BY */}
+          {hasAggregates ? (
+            <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-[11px] leading-relaxed">
+              <span className="font-bold">GROUP BY activo: </span>
+              {nonAggregatedCols.length > 0 ? (
+                <span>Se agrupará por las columnas no agregadas ({nonAggregatedCols.join(', ')}).</span>
+              ) : (
+                <span>Todas las columnas proyectadas utilizan agregación (resultado global).</span>
+              )}
+            </div>
+          ) : (
+            <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-500 text-[11px]">
+              No hay funciones de agregación en las columnas proyectadas. El GROUP BY no es necesario.
+            </div>
+          )}
+
+          {/* Condiciones HAVING */}
+          {havingConditions.length === 0 ? (
+            <p className="text-slate-400 py-2 text-center italic">
+              Sin condiciones HAVING. (Filtra resultados agrupados por agregaciones).
+            </p>
+          ) : (
+            <div className="space-y-2 max-h-44 overflow-y-auto custom-scrollbar pr-1">
+              {havingConditions.map((h) => (
+                <div key={h.id} className="flex items-center gap-1.5 flex-wrap bg-amber-50/50 p-2 rounded-xl border border-amber-200">
+                  {/* Selector o entrada de Expresión Agregada */}
+                  <select
+                    value={h.expression}
+                    onChange={(e) => handleUpdateHavingCondition(h.id, 'expression', e.target.value)}
+                    className="px-2 py-1 border border-amber-300 rounded-lg text-xs font-mono bg-white flex-1 min-w-[130px] font-semibold text-amber-900"
+                  >
+                    {/* Opciones de expresiones de agregación proyectadas */}
+                    <optgroup label="Expresiones recomendadas">
+                      {projectedColumns
+                        .filter((p) => p.aggregate !== 'NONE')
+                        .map((p) => {
+                          const expr = p.column === '*' ? 'COUNT(*)' : `${p.aggregate}(${p.column})`;
+                          return (
+                            <option key={p.id} value={expr}>
+                              {expr}
+                            </option>
+                          );
+                        })}
+                    </optgroup>
+                    <optgroup label="Todas las agregaciones disponibles">
+                      {availableAggregateExpressions.map((expr, idx) => (
+                        <option key={idx} value={expr}>
+                          {expr}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+
+                  <select
+                    value={h.operator}
+                    onChange={(e) => handleUpdateHavingCondition(h.id, 'operator', e.target.value)}
+                    className="px-2 py-1 border border-amber-300 rounded-lg text-xs font-mono bg-white font-bold text-amber-900"
+                  >
+                    <option value="=">=</option>
+                    <option value="!=">!=</option>
+                    <option value=">">&gt;</option>
+                    <option value="<">&lt;</option>
+                    <option value=">=">&gt;=</option>
+                    <option value="<=">&lt;=</option>
+                    <option value="LIKE">contiene (LIKE)</option>
+                    <option value="IS NULL">es NULL</option>
+                    <option value="IS NOT NULL">no es NULL</option>
+                  </select>
+
+                  {!['IS NULL', 'IS NOT NULL'].includes(h.operator) && (
+                    <input
+                      type="text"
+                      value={h.value}
+                      onChange={(e) => handleUpdateHavingCondition(h.id, 'value', e.target.value)}
+                      placeholder="Valor..."
+                      className="px-2 py-1 border border-amber-300 rounded-lg text-xs bg-white flex-1 min-w-[80px]"
+                    />
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveHavingCondition(h.id)}
+                    className="p-1 text-slate-400 hover:text-red-600 rounded"
+                    title="Quitar condición HAVING"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* BLOQUE 5: ORDENAMIENTO Y LÍMITE */}
+        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4 text-xs md:col-span-2">
           <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5 border-b border-slate-100 pb-2">
-            <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs">4</span>
+            <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs">5</span>
             <ArrowUpDown className="w-4 h-4 text-blue-600" />
             <span>Ordenamiento y Límite</span>
           </h3>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-1">
               <label className="block text-slate-600 font-semibold mb-1">
                 Ordenar por:
               </label>
@@ -538,26 +974,42 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
                 className="w-full px-2.5 py-2 border border-slate-300 rounded-xl bg-white font-mono text-xs"
               >
                 <option value="">-- Sin orden específico --</option>
-                {availableColumns.map((c) => (
-                  <option key={c.fullName} value={c.fullName}>
-                    {c.fullName}
-                  </option>
-                ))}
+                <optgroup label="Columnas Disponibles">
+                  {availableColumns.map((c) => (
+                    <option key={c.fullName} value={c.fullName}>
+                      {c.fullName}
+                    </option>
+                  ))}
+                </optgroup>
+                {hasAggregates && (
+                  <optgroup label="Expresiones de Agregación">
+                    {projectedColumns
+                      .filter((p) => p.aggregate !== 'NONE')
+                      .map((p) => {
+                        const expr = p.column === '*' ? 'COUNT(*)' : `${p.aggregate}(${p.column})`;
+                        return (
+                          <option key={p.id} value={expr}>
+                            {expr}
+                          </option>
+                        );
+                      })}
+                  </optgroup>
+                )}
               </select>
             </div>
 
-            <div>
+            <div className="sm:col-span-1">
               <label className="block text-slate-600 font-semibold mb-1">
                 Dirección:
               </label>
-              <div className="flex items-center gap-2 pt-1">
+              <div className="flex items-center gap-2 pt-0.5">
                 <button
                   type="button"
                   onClick={() => setOrderDirection('ASC')}
-                  className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                  className={`flex-1 py-2 text-xs font-semibold rounded-xl border transition-all ${
                     orderDirection === 'ASC'
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white text-slate-700 border-slate-200'
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                   }`}
                 >
                   Ascendente (A-Z)
@@ -565,10 +1017,10 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
                 <button
                   type="button"
                   onClick={() => setOrderDirection('DESC')}
-                  className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                  className={`flex-1 py-2 text-xs font-semibold rounded-xl border transition-all ${
                     orderDirection === 'DESC'
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white text-slate-700 border-slate-200'
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                   }`}
                 >
                   Descendente (Z-A)
@@ -576,14 +1028,14 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
               </div>
             </div>
 
-            <div className="sm:col-span-2 flex items-center justify-between pt-1">
-              <label className="text-slate-600 font-semibold">
-                Límite de registros a mostrar:
+            <div className="sm:col-span-1">
+              <label className="block text-slate-600 font-semibold mb-1">
+                Límite de registros:
               </label>
               <select
                 value={limit}
                 onChange={(e) => setLimit(Number(e.target.value))}
-                className="px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-xs"
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white font-mono text-xs"
               >
                 <option value={10}>10 registros</option>
                 <option value={20}>20 registros</option>
