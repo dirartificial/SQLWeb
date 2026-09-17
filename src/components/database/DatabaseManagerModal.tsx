@@ -33,6 +33,8 @@ export const DatabaseManagerModal: React.FC<DatabaseManagerModalProps> = ({
     isSaving,
     lastSaved,
     tables,
+    dbName,
+    setDbName,
     downloadDatabaseFile,
     importDatabaseFile,
     resetDatabase,
@@ -47,13 +49,33 @@ export const DatabaseManagerModal: React.FC<DatabaseManagerModalProps> = ({
   const [isSendingTelemetry, setIsSendingTelemetry] = useState<boolean>(false);
   const [showTelemetrySection, setShowTelemetrySection] = useState<boolean>(false);
 
+  const [editingDbName, setEditingDbName] = useState<string>(dbName);
+  const [isSavingDbName, setIsSavingDbName] = useState<boolean>(false);
+
+  React.useEffect(() => {
+    setEditingDbName(dbName);
+  }, [dbName]);
+
   if (!isOpen) return null;
+
+  const handleSaveDbName = async () => {
+    const trimmed = editingDbName.trim();
+    if (trimmed) {
+      setIsSavingDbName(true);
+      await setDbName(trimmed);
+      setIsSavingDbName(false);
+      setFeedback({
+        type: 'success',
+        message: `Nombre de la base de datos actualizado a "${trimmed}".`,
+      });
+    }
+  };
 
   const handleDownload = () => {
     downloadDatabaseFile();
     setFeedback({
       type: 'success',
-      message: 'Descarga iniciada: Se guardó el archivo simulador_base_datos.sqlite en tu dispositivo.',
+      message: `Descarga iniciada: Se guardó el archivo ${dbName ? dbName.toLowerCase().replace(/[^a-z0-9]/g, '_') : 'simulador_base_datos'}.sqlite en tu dispositivo.`,
     });
   };
 
@@ -185,8 +207,37 @@ export const DatabaseManagerModal: React.FC<DatabaseManagerModalProps> = ({
           </div>
         )}
 
+        {/* Editar Nombre de la Base de Datos */}
+        <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 space-y-2 text-xs">
+          <label className="block text-xs font-bold text-slate-800">
+            Nombre de la Base de Datos:
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={editingDbName}
+              onChange={(e) => setEditingDbName(e.target.value)}
+              placeholder="Ej: Gestion_Alumnos"
+              className="flex-1 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+            />
+            <button
+              type="button"
+              onClick={handleSaveDbName}
+              disabled={isSavingDbName || !editingDbName.trim() || editingDbName.trim() === dbName}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition-colors flex-shrink-0"
+            >
+              {isSavingDbName ? 'Guardando...' : 'Cambiar Nombre'}
+            </button>
+          </div>
+        </div>
+
         {/* Estado actual de la persistencia */}
         <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-2 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-500 font-medium">Base de Datos activa:</span>
+            <span className="font-bold font-mono text-slate-900">{dbName}</span>
+          </div>
+
           <div className="flex items-center justify-between">
             <span className="text-slate-500 font-medium">Estado de auto-guardado:</span>
             {isSaving ? (

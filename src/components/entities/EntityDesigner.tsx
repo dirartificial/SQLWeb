@@ -3,6 +3,7 @@ import { useDatabase } from '../../context/DatabaseContext';
 import { EntityWizard } from './EntityWizard';
 import { ViewDdlModal } from './ViewDdlModal';
 import { AddColumnModal } from './AddColumnModal';
+import { EditEntityModal } from './EditEntityModal';
 import {
   Table as TableIcon,
   Plus,
@@ -12,7 +13,8 @@ import {
   Link as LinkIcon,
   Sparkles,
   AlertTriangle,
-  FolderOpen
+  FolderOpen,
+  Pencil
 } from 'lucide-react';
 
 export const EntityDesigner: React.FC = () => {
@@ -21,6 +23,7 @@ export const EntityDesigner: React.FC = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [selectedTableForDdl, setSelectedTableForDdl] = useState<string | null>(null);
   const [selectedTableForAddCol, setSelectedTableForAddCol] = useState<string | null>(null);
+  const [selectedTableForEdit, setSelectedTableForEdit] = useState<string | null>(null);
   const [tableToDelete, setTableToDelete] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
@@ -186,6 +189,13 @@ export const EntityDesigner: React.FC = () => {
 
                   <div className="flex items-center gap-1">
                     <button
+                      onClick={() => setSelectedTableForEdit(tName)}
+                      className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="Editar estructura de la entidad (Nombre, Columnas)"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
                       onClick={() => setSelectedTableForDdl(tName)}
                       className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                       title="Ver DDL (CREATE TABLE)"
@@ -268,24 +278,47 @@ export const EntityDesigner: React.FC = () => {
                 {/* Pie de la tarjeta */}
                 <div className="px-4 py-2.5 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between text-xs">
                   <button
-                    onClick={() => setSelectedTableForAddCol(tName)}
+                    onClick={() => setSelectedTableForEdit(tName)}
                     className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-semibold"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Agregar Columna</span>
+                    <Pencil className="w-3.5 h-3.5" />
+                    <span>Editar Entidad</span>
                   </button>
 
-                  <button
-                    onClick={() => setSelectedTableForDdl(tName)}
-                    className="text-slate-500 hover:text-slate-800 font-medium"
-                  >
-                    Ver DDL
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setSelectedTableForAddCol(tName)}
+                      className="inline-flex items-center gap-1 text-slate-600 hover:text-blue-600 font-medium"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Columna</span>
+                    </button>
+                    <button
+                      onClick={() => setSelectedTableForDdl(tName)}
+                      className="text-slate-500 hover:text-slate-800 font-medium"
+                    >
+                      Ver DDL
+                    </button>
+                  </div>
                 </div>
               </div>
             );
           })}
         </div>
+      )}
+
+      {/* Modal Editar Entidad */}
+      {selectedTableForEdit && (
+        <EditEntityModal
+          tableName={selectedTableForEdit}
+          isOpen={true}
+          onClose={() => setSelectedTableForEdit(null)}
+          onSuccess={(msg) => {
+            refreshTables();
+            setActionSuccess(msg);
+            setTimeout(() => setActionSuccess(null), 3500);
+          }}
+        />
       )}
 
       {/* Modal Ver DDL */}

@@ -51,10 +51,11 @@ Esta metadata se puede reconstruir en cualquier momento vía `PRAGMA table_info(
 
 **UI**:
 - Botón "Nueva entidad" → formulario con nombre de la tabla.
-- Dentro de la entidad: agregar columnas una por una (nombre, tipo desde un select, checkbox "clave primaria", checkbox "obligatorio").
+- Dentro de la entidad: agregar columnas una por una (nombre, tipo desde un select, checkbox "clave primaria", checkbox "obligatorio"), con controles para reordenar columnas (subir/bajar) y cambiar el tipo de dato de columnas ya configuradas.
 - Botón "Agregar relación" → selector de tabla destino + columna destino → genera `FOREIGN KEY`.
 - Al guardar, se muestra el DDL generado (`CREATE TABLE ...`) antes de ejecutarlo, para que el alumno lo lea.
-- Listado de entidades creadas, con opción de editar estructura (ALTER TABLE limitado: agregar columna) o eliminar.
+- Listado de entidades creadas, con opción de editar estructura completa (`ALTER TABLE` / recreación de tabla): renombrar tabla, renombrar columna, cambiar tipo de dato, reordenar posición de columnas (subir/bajar), eliminar columna y agregar columna manteniendo los registros existentes.
+- Opción de editar el nombre de la base de datos activa (en la cabecera y en el panel de gestión local), el cual se utiliza para nombrar los archivos `.sqlite` descargados.
 
 **Validaciones**:
 - No permitir nombres de tabla/columna duplicados.

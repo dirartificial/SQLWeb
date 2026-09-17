@@ -215,6 +215,142 @@ export function addColumn(db: Database, tableName: string, column: ColumnDefinit
 }
 
 /**
+ * Renombra una tabla con ALTER TABLE RENAME TO.
+ */
+export function renameTable(db: Database, oldName: string, newName: string): ExecutionResult {
+  const trimmedNew = newName.trim();
+  if (!trimmedNew) {
+    return { success: false, error: 'El nuevo nombre de la tabla no puede estar vacío.' };
+  }
+  if (oldName === trimmedNew) {
+    return { success: true, rowsAffected: 0 };
+  }
+  const sql = `ALTER TABLE "${oldName}" RENAME TO "${trimmedNew}";`;
+  const res = runQuery(db, sql);
+  if (!res.success && res.error) {
+    return { ...res, error: formatSqliteError(res.error) };
+  }
+  return res;
+}
+
+/**
+ * Renombra una columna con ALTER TABLE RENAME COLUMN.
+ */
+export function renameColumn(db: Database, tableName: string, oldColName: string, newColName: string): ExecutionResult {
+  const trimmedNew = newColName.trim();
+  if (!trimmedNew) {
+    return { success: false, error: 'El nuevo nombre de la columna no puede estar vacío.' };
+  }
+  if (oldColName === trimmedNew) {
+    return { success: true, rowsAffected: 0 };
+  }
+  const sql = `ALTER TABLE "${tableName}" RENAME COLUMN "${oldColName}" TO "${trimmedNew}";`;
+  const res = runQuery(db, sql);
+  if (!res.success && res.error) {
+    return { ...res, error: formatSqliteError(res.error) };
+  }
+  return res;
+}
+
+/**
+ * Elimina una columna con ALTER TABLE DROP COLUMN.
+ */
+export function dropColumn(db: Database, tableName: string, colName: string): ExecutionResult {
+  const sql = `ALTER TABLE "${tableName}" DROP COLUMN "${colName}";`;
+  const res = runQuery(db, sql);
+  if (!res.success && res.error) {
+    return { ...res, error: formatSqliteError(res.error) };
+  }
+  return res;
+}
+
+/**
+ * Recrea una tabla en SQLite con un nuevo esquema (nuevos nombres, cambio de tipos de datos o reordenamiento de columnas)
+ * preservando todos los datos existentes.
+ */
+export function updateTableSchema(
+  db: Database,
+  oldTableName: string,
+  newTableName: string,
+  newColumns: ColumnDefinition[],
+  colNameMap: Record<string, string> = {}
+): ExecutionResult {
+  const trimmedNewTable = newTableName.trim();
+  if (!trimmedNewTable) {
+    return { success: false, error: 'El nombre de la tabla no puede estar vacío.' };
+  }
+
+  try {
+    const oldInfo = getTableMetadata(db, oldTableName);
+    if (!oldInfo) {
+      return { success: false, error: `No se encontró la tabla "${oldTableName}".` };
+    }
+
+    const tempTableName = `__temp_${oldTableName}_${Date.now()}`;
+    const fks = oldInfo.foreignKeys || [];
+
+    // Generar SQL para crear la tabla temporal con el nuevo esquema y orden
+    const createSql = generateCreateTableSql(tempTableName, newColumns, fks);
+
+    db.run('PRAGMA foreign_keys = OFF;');
+
+    const createRes = runQuery(db, createSql);
+    if (!createRes.success) {
+      db.run('PRAGMA foreign_keys = ON;');
+      return createRes;
+    }
+
+    // Mapeo de columnas para copiar datos (INSERT INTO temp (newCols) SELECT oldCols FROM old)
+    const oldColNames = oldInfo.columns.map((c) => c.name);
+    const destCols: string[] = [];
+    const srcCols: string[] = [];
+
+    for (const newCol of newColumns) {
+      // Buscar si corresponde a una columna antigua
+      const oldColMatch = Object.entries(colNameMap).find(([, newName]) => newName === newCol.name)?.[0]
+        || (oldColNames.includes(newCol.name) ? newCol.name : null);
+
+      if (oldColMatch && oldColNames.includes(oldColMatch)) {
+        destCols.push(`"${newCol.name}"`);
+        srcCols.push(`"${oldColMatch}"`);
+      }
+    }
+
+    if (destCols.length > 0) {
+      const copySql = `INSERT INTO "${tempTableName}" (${destCols.join(', ')}) SELECT ${srcCols.join(', ')} FROM "${oldTableName}";`;
+      const copyRes = runQuery(db, copySql);
+      if (!copyRes.success) {
+        runQuery(db, `DROP TABLE "${tempTableName}";`);
+        db.run('PRAGMA foreign_keys = ON;');
+        return copyRes;
+      }
+    }
+
+    // Borrar la tabla antigua
+    const dropRes = runQuery(db, `DROP TABLE "${oldTableName}";`);
+    if (!dropRes.success) {
+      runQuery(db, `DROP TABLE "${tempTableName}";`);
+      db.run('PRAGMA foreign_keys = ON;');
+      return dropRes;
+    }
+
+    // Renombrar la tabla temporal al nombre final
+    const renameRes = runQuery(db, `ALTER TABLE "${tempTableName}" RENAME TO "${trimmedNewTable}";`);
+    db.run('PRAGMA foreign_keys = ON;');
+
+    if (!renameRes.success && renameRes.error) {
+      return { ...renameRes, error: formatSqliteError(renameRes.error) };
+    }
+
+    return renameRes;
+  } catch (err: unknown) {
+    db.run('PRAGMA foreign_keys = ON;');
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Error al actualizar la estructura de la tabla: ${msg}` };
+  }
+}
+
+/**
  * Elimina una tabla con DROP TABLE.
  */
 export function dropTable(db: Database, tableName: string): ExecutionResult {

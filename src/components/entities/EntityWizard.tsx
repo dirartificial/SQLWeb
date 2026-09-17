@@ -5,6 +5,8 @@ import { generateCreateTableSql } from '../../lib/database';
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
+  ArrowDown,
   Check,
   Key,
   Link as LinkIcon,
@@ -45,6 +47,24 @@ export const EntityWizard: React.FC<EntityWizardProps> = ({ onCancel, onSuccess 
   // Actualizar columnas destino cuando cambia la tabla destino
   const targetTableInfo = fkTargetTable ? getTableInfo(fkTargetTable) : null;
   const targetTableCols = targetTableInfo ? targetTableInfo.columns : [];
+
+  // Mover columna arriba/abajo
+  const handleMoveColumn = (index: number, direction: 'up' | 'down') => {
+    const newCols = [...columns];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= newCols.length) return;
+    const temp = newCols[index];
+    newCols[index] = newCols[targetIndex];
+    newCols[targetIndex] = temp;
+    setColumns(newCols);
+  };
+
+  // Cambiar tipo de dato de una columna existente en la lista
+  const handleUpdateColumnType = (colName: string, newType: SqliteDataType) => {
+    setColumns((prev) =>
+      prev.map((c) => (c.name === colName ? { ...c, type: newType } : c))
+    );
+  };
 
   // Sugerir ID por defecto al inicio
   const handleAddDefaultId = () => {
@@ -328,18 +348,51 @@ export const EntityWizard: React.FC<EntityWizardProps> = ({ onCancel, onSuccess 
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
-                  {columns.map((col) => (
+                  {columns.map((col, idx) => (
                     <div
                       key={col.name}
                       className="p-3 flex items-center justify-between hover:bg-white transition-colors"
                     >
                       <div className="flex items-center gap-2 flex-wrap">
+                        {/* Controles de Reordenamiento */}
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => handleMoveColumn(idx, 'up')}
+                            disabled={idx === 0}
+                            className="p-1 text-slate-400 hover:text-blue-600 disabled:opacity-20 rounded"
+                            title="Subir posición"
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMoveColumn(idx, 'down')}
+                            disabled={idx === columns.length - 1}
+                            className="p-1 text-slate-400 hover:text-blue-600 disabled:opacity-20 rounded"
+                            title="Bajar posición"
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
                         <span className="font-mono text-xs font-bold text-slate-800">
                           {col.name}
                         </span>
-                        <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-slate-200 text-slate-700">
-                          {col.type}
-                        </span>
+
+                        {/* Selector para cambiar Tipo de Dato */}
+                        <select
+                          value={col.type}
+                          onChange={(e) => handleUpdateColumnType(col.name, e.target.value as SqliteDataType)}
+                          className="px-1.5 py-0.5 text-[11px] font-mono border border-slate-300 rounded bg-white text-slate-700 focus:ring-1 focus:ring-blue-500"
+                        >
+                          <option value="INTEGER">INTEGER</option>
+                          <option value="TEXT">TEXT</option>
+                          <option value="REAL">REAL</option>
+                          <option value="DATE">DATE</option>
+                          <option value="BOOLEAN">BOOLEAN</option>
+                        </select>
+
                         {col.isPrimaryKey && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded bg-amber-100 text-amber-800">
                             <Key className="w-2.5 h-2.5" />
@@ -356,7 +409,7 @@ export const EntityWizard: React.FC<EntityWizardProps> = ({ onCancel, onSuccess 
                       <button
                         type="button"
                         onClick={() => handleRemoveColumn(col.name)}
-                        className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg transition-colors"
+                        className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg transition-colors ml-2"
                         title="Eliminar columna"
                       >
                         <Trash2 className="w-4 h-4" />

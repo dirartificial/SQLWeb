@@ -8,6 +8,10 @@ import {
   getTableSql,
   generateCreateTableSql,
   addColumn,
+  renameTable,
+  renameColumn,
+  dropColumn,
+  updateTableSchema,
   dropTable,
   getTableRows,
   getForeignKeyOptions,
@@ -19,7 +23,9 @@ import {
 } from '../lib/database';
 import {
   saveDatabaseToIndexedDb,
+  saveDatabaseNameToIndexedDb,
   loadDatabaseFromIndexedDb,
+  loadDatabaseNameFromIndexedDb,
   deleteDatabaseFromIndexedDb,
   isValidSqliteHeader,
 } from '../lib/storage';
@@ -27,6 +33,7 @@ import { ExecutionResult, ColumnDefinition, ForeignKeyDefinition, TableDefinitio
 
 interface DatabaseContextType {
   db: Database | null;
+  dbName: string;
   isReady: boolean;
   isLoading: boolean;
   isSaving: boolean;
@@ -34,11 +41,16 @@ interface DatabaseContextType {
   initError: string | null;
   tables: string[];
   dbVersion: number;
+  setDbName: (name: string) => Promise<void>;
   refreshTables: () => void;
   exec: (sql: string) => ExecutionResult;
   getTableInfo: (tableName: string) => TableDefinition | null;
   getTableDdl: (tableName: string) => string | null;
   createTable: (tableName: string, columns: ColumnDefinition[], fks?: ForeignKeyDefinition[]) => ExecutionResult;
+  editTableName: (oldName: string, newName: string) => ExecutionResult;
+  editColumnName: (tableName: string, oldColName: string, newColName: string) => ExecutionResult;
+  deleteColumn: (tableName: string, colName: string) => ExecutionResult;
+  updateTableSchema: (oldTableName: string, newTableName: string, newColumns: ColumnDefinition[], colNameMap?: Record<string, string>) => ExecutionResult;
   deleteTable: (tableName: string) => ExecutionResult;
   addNewColumn: (tableName: string, col: ColumnDefinition) => ExecutionResult;
   getTableData: (tableName: string) => TableRowData;
@@ -57,6 +69,7 @@ const DatabaseContext = createContext<DatabaseContextType | undefined>(undefined
 
 export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [db, setDb] = useState<Database | null>(null);
+  const [dbName, setDbNameState] = useState<string>('Mi Base de Datos');
   const [isReady, setIsReady] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -69,6 +82,12 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const notifyDataChange = useCallback(() => {
     setDbVersion((v) => v + 1);
+  }, []);
+
+  const setDbName = useCallback(async (newName: string) => {
+    const trimmed = newName.trim() || 'Mi Base de Datos';
+    setDbNameState(trimmed);
+    await saveDatabaseNameToIndexedDb(trimmed);
   }, []);
 
   const refreshTables = useCallback(() => {
@@ -114,10 +133,14 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         // Comprobar si hay una base de datos guardada previamente en IndexedDB
         const storedBinary = await loadDatabaseFromIndexedDb();
+        const storedName = await loadDatabaseNameFromIndexedDb();
         const database = await createDatabaseInstance(storedBinary || undefined);
 
         if (mounted) {
           setDb(database);
+          if (storedName) {
+            setDbNameState(storedName);
+          }
           setIsReady(true);
           setIsLoading(false);
           setTables(getUserTables(database));
@@ -191,6 +214,75 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       const sql = generateCreateTableSql(tableName, columns, fks);
       const res = runQuery(db, sql);
+      if (res.success) {
+        refreshTables();
+        notifyDataChange();
+        scheduleAutoSave();
+      }
+      return res;
+    },
+    [db, refreshTables, notifyDataChange, scheduleAutoSave]
+  );
+
+  const editTableName = useCallback(
+    (oldName: string, newName: string): ExecutionResult => {
+      if (!db) {
+        return { success: false, error: 'La base de datos no está lista.' };
+      }
+      const res = renameTable(db, oldName, newName);
+      if (res.success) {
+        refreshTables();
+        notifyDataChange();
+        scheduleAutoSave();
+      }
+      return res;
+    },
+    [db, refreshTables, notifyDataChange, scheduleAutoSave]
+  );
+
+  const editColumnName = useCallback(
+    (tableName: string, oldColName: string, newColName: string): ExecutionResult => {
+      if (!db) {
+        return { success: false, error: 'La base de datos no está lista.' };
+      }
+      const res = renameColumn(db, tableName, oldColName, newColName);
+      if (res.success) {
+        refreshTables();
+        notifyDataChange();
+        scheduleAutoSave();
+      }
+      return res;
+    },
+    [db, refreshTables, notifyDataChange, scheduleAutoSave]
+  );
+
+  const deleteColumn = useCallback(
+    (tableName: string, colName: string): ExecutionResult => {
+      if (!db) {
+        return { success: false, error: 'La base de datos no está lista.' };
+      }
+      const res = dropColumn(db, tableName, colName);
+      if (res.success) {
+        refreshTables();
+        notifyDataChange();
+        scheduleAutoSave();
+      }
+      return res;
+    },
+    [db, refreshTables, notifyDataChange, scheduleAutoSave]
+  );
+
+  const updateTableSchemaCall = useCallback(
+    (
+      oldTableName: string,
+      newTableName: string,
+      newColumns: ColumnDefinition[],
+      colNameMap: Record<string, string> = {}
+    ): ExecutionResult => {
+      if (!db) {
+        return { success: false, error: 'La base de datos no está lista.' };
+      }
+      const res = updateTableSchema(db, oldTableName, newTableName, newColumns, colNameMap);
       if (res.success) {
         refreshTables();
         notifyDataChange();
@@ -317,20 +409,22 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Descargar archivo .sqlite
   const downloadDatabaseFile = useCallback(
-    (filename = 'simulador_base_datos.sqlite') => {
+    (filename?: string) => {
       if (!db) return;
+      const safeDbName = dbName ? dbName.toLowerCase().replace(/[^a-z0-9]/g, '_') : 'simulador_base_datos';
+      const finalFilename = filename || `${safeDbName}.sqlite`;
       const binary = db.export();
       const blob = new Blob([binary.buffer as ArrayBuffer], { type: 'application/x-sqlite3' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = filename;
+      a.download = finalFilename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     },
-    [db]
+    [db, dbName]
   );
 
   // Importar archivo .sqlite o .db desde disco
@@ -357,6 +451,13 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setDb(newDb);
         const loadedTables = getUserTables(newDb);
         setTables(loadedTables);
+
+        // Actualizar el nombre de la BD con el nombre del archivo sin extensión
+        const importedName = file.name.replace(/\.(sqlite|db)$/i, '');
+        if (importedName) {
+          await setDbName(importedName);
+        }
+
         notifyDataChange();
         await persistToStorage(newDb);
         setIsLoading(false);
@@ -374,7 +475,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         };
       }
     },
-    [db, notifyDataChange, persistToStorage]
+    [db, notifyDataChange, persistToStorage, setDbName]
   );
 
   // Reiniciar base de datos en memoria y limpiar IndexedDB
@@ -389,6 +490,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       await deleteDatabaseFromIndexedDb();
       setLastSaved(null);
+      setDbNameState('Mi Base de Datos');
 
       const newDb = await createDatabaseInstance();
       setDb(newDb);
@@ -410,6 +512,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const contextValue = useMemo<DatabaseContextType>(
     () => ({
       db,
+      dbName,
       isReady,
       isLoading,
       isSaving,
@@ -417,11 +520,16 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       initError,
       tables,
       dbVersion,
+      setDbName,
       refreshTables,
       exec,
       getTableInfo,
       getTableDdl,
       createTable,
+      editTableName,
+      editColumnName,
+      deleteColumn,
+      updateTableSchema: updateTableSchemaCall,
       deleteTable,
       addNewColumn,
       getTableData,
@@ -437,6 +545,7 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }),
     [
       db,
+      dbName,
       isReady,
       isLoading,
       isSaving,
@@ -444,11 +553,16 @@ export const DatabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       initError,
       tables,
       dbVersion,
+      setDbName,
       refreshTables,
       exec,
       getTableInfo,
       getTableDdl,
       createTable,
+      editTableName,
+      editColumnName,
+      deleteColumn,
+      updateTableSchemaCall,
       deleteTable,
       addNewColumn,
       getTableData,
@@ -478,3 +592,4 @@ export function useDatabase(): DatabaseContextType {
   }
   return context;
 }
+

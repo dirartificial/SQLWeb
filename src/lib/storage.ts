@@ -37,6 +37,45 @@ export async function saveDatabaseToIndexedDb(binary: Uint8Array): Promise<void>
   });
 }
 
+const DB_NAME_KEY = 'active_sqlite_db_name';
+
+/**
+ * Guarda el nombre de la base de datos en IndexedDB.
+ */
+export async function saveDatabaseNameToIndexedDb(name: string): Promise<void> {
+  const db = await openIndexedDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.put(name, DB_NAME_KEY);
+
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/**
+ * Recupera el nombre de la base de datos desde IndexedDB.
+ */
+export async function loadDatabaseNameFromIndexedDb(): Promise<string | null> {
+  const db = await openIndexedDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.get(DB_NAME_KEY);
+
+    request.onsuccess = () => {
+      const result = request.result;
+      if (typeof result === 'string') {
+        resolve(result);
+      } else {
+        resolve(null);
+      }
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
 /**
  * Recupera el binario Uint8Array de SQLite almacenado en IndexedDB.
  */
@@ -62,17 +101,18 @@ export async function loadDatabaseFromIndexedDb(): Promise<Uint8Array | null> {
 }
 
 /**
- * Elimina la base de datos almacenada en IndexedDB.
+ * Elimina la base de datos y su nombre almacenados en IndexedDB.
  */
 export async function deleteDatabaseFromIndexedDb(): Promise<void> {
   const db = await openIndexedDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     const store = tx.objectStore(STORE_NAME);
-    const request = store.delete(DB_KEY);
+    store.delete(DB_KEY);
+    store.delete(DB_NAME_KEY);
 
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
   });
 }
 
