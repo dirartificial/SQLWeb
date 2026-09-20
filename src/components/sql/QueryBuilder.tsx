@@ -24,6 +24,17 @@ import {
 
 export type AggregateFunc = 'NONE' | 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX';
 
+export type JoinType = 'INNER JOIN' | 'LEFT JOIN' | 'RIGHT JOIN' | 'FULL JOIN';
+
+export interface QueryJoin {
+  id: string;
+  joinType: JoinType;
+  fromTable: string;
+  fromCol: string;
+  toTable: string;
+  toCol: string;
+}
+
 export interface ProjectedColumn {
   id: string;
   column: string; // ej. "productos.precio" o "*"
@@ -57,8 +68,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
   const { tables, getTableInfo, exec, isReady, isLoading } = useDatabase();
 
   const [primaryTable, setPrimaryTable] = useState<string>(tables[0] || '');
-  const [enableJoin, setEnableJoin] = useState<boolean>(false);
-  const [joinFkIndex, setJoinFkIndex] = useState<number>(0);
+  const [joins, setJoins] = useState<QueryJoin[]>([]);
 
   // Columnas a proyectar con orden y funciones de agregación
   const [projectedColumns, setProjectedColumns] = useState<ProjectedColumn[]>([]);
@@ -86,12 +96,23 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
     return getTableInfo(primaryTable);
   }, [primaryTable, getTableInfo]);
 
-  // Detectar relaciones FK disponibles para INNER JOIN
-  const availableJoins = useMemo(() => {
-    if (!primaryTable || !primaryMeta) return [];
+  // Tablas incluidas actualmente en la consulta (tabla principal + tablas combinadas)
+  const includedTables = useMemo(() => {
+    const list: string[] = [];
+    if (primaryTable) list.push(primaryTable);
+    for (const j of joins) {
+      if (j.toTable && !list.includes(j.toTable)) {
+        list.push(j.toTable);
+      }
+    }
+    return list;
+  }, [primaryTable, joins]);
 
-    const joins: {
-      type: 'outgoing' | 'incoming';
+  // Relaciones FK sugeridas entre las tablas actualmente incluidas y otras tablas no incluidas
+  const suggestedJoins = useMemo(() => {
+    if (tables.length === 0 || includedTables.length === 0) return [];
+
+    const suggestions: {
       fromTable: string;
       fromCol: string;
       toTable: string;
@@ -99,79 +120,65 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
       label: string;
     }[] = [];
 
-    // Salientes (primaryTable apunta a otra)
-    if (primaryMeta.foreignKeys) {
-      for (const fk of primaryMeta.foreignKeys) {
-        joins.push({
-          type: 'outgoing',
-          fromTable: primaryTable,
-          fromCol: fk.columnName,
-          toTable: fk.targetTable,
-          toCol: fk.targetColumn,
-          label: `${primaryTable}.${fk.columnName} = ${fk.targetTable}.${fk.targetColumn}`,
-        });
-      }
-    }
-
-    // Entrantes (otras tablas apuntan a primaryTable)
-    for (const t of tables) {
-      if (t === primaryTable) continue;
-      const otherMeta = getTableInfo(t);
-      if (otherMeta && otherMeta.foreignKeys) {
-        for (const fk of otherMeta.foreignKeys) {
-          if (fk.targetTable === primaryTable) {
-            joins.push({
-              type: 'incoming',
-              fromTable: t,
+    // Salientes: tablas incluidas apuntan a tablas no incluidas
+    for (const incTable of includedTables) {
+      const meta = getTableInfo(incTable);
+      if (meta?.foreignKeys) {
+        for (const fk of meta.foreignKeys) {
+          if (!includedTables.includes(fk.targetTable)) {
+            suggestions.push({
+              fromTable: incTable,
               fromCol: fk.columnName,
-              toTable: primaryTable,
+              toTable: fk.targetTable,
               toCol: fk.targetColumn,
-              label: `${t}.${fk.columnName} = ${primaryTable}.${fk.targetColumn}`,
+              label: `${incTable}.${fk.columnName} = ${fk.targetTable}.${fk.targetColumn}`,
             });
           }
         }
       }
     }
 
-    return joins;
-  }, [primaryTable, primaryMeta, tables, getTableInfo]);
-
-  const activeJoin = availableJoins[joinFkIndex] || null;
-  const secondaryTable = activeJoin
-    ? activeJoin.type === 'outgoing'
-      ? activeJoin.toTable
-      : activeJoin.fromTable
-    : null;
-  const secondaryMeta = useMemo(() => {
-    if (!secondaryTable) return null;
-    return getTableInfo(secondaryTable);
-  }, [secondaryTable, getTableInfo]);
-
-  // Lista de todas las columnas disponibles (tabla principal + secundaria si hay JOIN)
-  const availableColumns = useMemo(() => {
-    const list: { fullName: string; shortName: string; table: string }[] = [];
-    if (primaryMeta) {
-      for (const col of primaryMeta.columns) {
-        list.push({
-          fullName: `${primaryTable}.${col.name}`,
-          shortName: col.name,
-          table: primaryTable,
-        });
+    // Entrantes: tablas no incluidas apuntan a alguna tabla incluida
+    for (const t of tables) {
+      if (includedTables.includes(t)) continue;
+      const meta = getTableInfo(t);
+      if (meta?.foreignKeys) {
+        for (const fk of meta.foreignKeys) {
+          if (includedTables.includes(fk.targetTable)) {
+            suggestions.push({
+              fromTable: fk.targetTable,
+              fromCol: fk.targetColumn,
+              toTable: t,
+              toCol: fk.columnName,
+              label: `${fk.targetTable}.${fk.targetColumn} = ${t}.${fk.columnName}`,
+            });
+          }
+        }
       }
     }
-    if (enableJoin && secondaryMeta && secondaryTable) {
-      for (const col of secondaryMeta.columns) {
-        list.push({
-          fullName: `${secondaryTable}.${col.name}`,
-          shortName: col.name,
-          table: secondaryTable,
-        });
+
+    return suggestions;
+  }, [includedTables, tables, getTableInfo]);
+
+  // Lista de todas las columnas disponibles (tabla principal + todas las tablas unidas por JOIN)
+  const availableColumns = useMemo(() => {
+    const list: { fullName: string; shortName: string; table: string }[] = [];
+    for (const tableName of includedTables) {
+      const meta = getTableInfo(tableName);
+      if (meta) {
+        for (const col of meta.columns) {
+          list.push({
+            fullName: `${tableName}.${col.name}`,
+            shortName: col.name,
+            table: tableName,
+          });
+        }
       }
     }
     return list;
-  }, [primaryMeta, primaryTable, enableJoin, secondaryMeta, secondaryTable]);
+  }, [includedTables, getTableInfo]);
 
-  // Al cambiar de tabla principal, inicializar proyectadas y resetear filtros/having
+  // Al cambiar de tabla principal, inicializar proyectadas y resetear joins/filtros/having
   useEffect(() => {
     if (primaryMeta) {
       const initialProj: ProjectedColumn[] = primaryMeta.columns.map((c) => ({
@@ -185,12 +192,110 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
       setProjectedColumns([]);
       setOrderByColumn('');
     }
-    setEnableJoin(false);
-    setJoinFkIndex(0);
+    setJoins([]);
     setFilters([]);
     setHavingConditions([]);
     setResult(null);
   }, [primaryTable, primaryMeta]);
+
+  // Limpiar columnas proyectadas y filtros si una tabla deja de estar en la consulta
+  useEffect(() => {
+    const validTables = new Set(includedTables);
+
+    setProjectedColumns((prev) =>
+      prev.filter((item) => {
+        if (item.column === '*') return true;
+        const tableName = item.column.split('.')[0];
+        return validTables.has(tableName);
+      })
+    );
+
+    setFilters((prev) =>
+      prev.filter((item) => {
+        const tableName = item.column.split('.')[0];
+        return validTables.has(tableName);
+      })
+    );
+
+    if (orderByColumn && orderByColumn.includes('.')) {
+      const tableName = orderByColumn.split('.')[0];
+      if (!validTables.has(tableName)) {
+        setOrderByColumn('');
+      }
+    }
+  }, [includedTables]);
+
+  // Agregar un JOIN sugerido por relación FK
+  const handleAddSuggestedJoin = (sugg: {
+    fromTable: string;
+    fromCol: string;
+    toTable: string;
+    toCol: string;
+  }) => {
+    setJoins((prev) => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        joinType: 'INNER JOIN',
+        fromTable: sugg.fromTable,
+        fromCol: sugg.fromCol,
+        toTable: sugg.toTable,
+        toCol: sugg.toCol,
+      },
+    ]);
+  };
+
+  // Agregar un JOIN manual personalizado
+  const handleAddCustomJoin = () => {
+    const targetTable =
+      tables.find((t) => !includedTables.includes(t)) ||
+      tables.find((t) => t !== primaryTable) ||
+      primaryTable;
+    const targetMeta = getTableInfo(targetTable);
+    const primaryMeta = getTableInfo(primaryTable);
+
+    const fromCol = primaryMeta?.columns[0]?.name || '';
+    const toCol = targetMeta?.columns[0]?.name || '';
+
+    setJoins((prev) => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        joinType: 'INNER JOIN',
+        fromTable: primaryTable,
+        fromCol,
+        toTable: targetTable,
+        toCol,
+      },
+    ]);
+  };
+
+  // Eliminar un JOIN
+  const handleRemoveJoin = (id: string) => {
+    setJoins((prev) => prev.filter((j) => j.id !== id));
+  };
+
+  // Actualizar un campo de un JOIN
+  const handleUpdateJoin = (id: string, field: keyof QueryJoin, value: any) => {
+    setJoins((prev) =>
+      prev.map((j) => {
+        if (j.id !== id) return j;
+        const updated = { ...j, [field]: value };
+
+        if (field === 'fromTable') {
+          const meta = getTableInfo(value);
+          updated.fromCol = meta?.columns[0]?.name || '';
+        }
+
+        if (field === 'toTable') {
+          const meta = getTableInfo(value);
+          updated.toCol = meta?.columns[0]?.name || '';
+        }
+
+        return updated;
+      })
+    );
+  };
 
   // Alternar selección de una columna disponible (agregar o quitar)
   const handleToggleAvailableColumn = (colFullName: string) => {
@@ -290,7 +395,6 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
 
   // Agregar condición HAVING
   const handleAddHavingCondition = () => {
-    // Buscar la primera expresión agregada proyectada o armar una por defecto
     const aggProj = projectedColumns.find((c) => c.aggregate !== 'NONE');
     let defaultExpr = '';
     if (aggProj) {
@@ -378,12 +482,10 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
 
     let sql = `SELECT\n${colsClause}\nFROM "${primaryTable}"`;
 
-    // INNER JOIN
-    if (enableJoin && activeJoin && secondaryTable) {
-      if (activeJoin.type === 'outgoing') {
-        sql += `\nINNER JOIN "${secondaryTable}" ON ${primaryTable}.${activeJoin.fromCol} = ${secondaryTable}.${activeJoin.toCol}`;
-      } else {
-        sql += `\nINNER JOIN "${secondaryTable}" ON ${secondaryTable}.${activeJoin.fromCol} = ${primaryTable}.${activeJoin.toCol}`;
+    // JOINs
+    for (const j of joins) {
+      if (j.toTable && j.fromTable && j.fromCol && j.toCol) {
+        sql += `\n${j.joinType} "${j.toTable}" ON ${j.fromTable}.${j.fromCol} = ${j.toTable}.${j.toCol}`;
       }
     }
 
@@ -447,9 +549,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
   }, [
     primaryTable,
     projectedColumns,
-    enableJoin,
-    activeJoin,
-    secondaryTable,
+    joins,
     filters,
     hasAggregates,
     nonAggregatedCols,
@@ -503,7 +603,7 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
             Asistente Visual de Consultas (Query Builder)
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Diseña consultas visualmente: ordena columnas, aplica funciones de agregación (COUNT, SUM, AVG...), configura GROUP BY y filtra con WHERE y HAVING.
+            Diseña consultas visualmente: combina múltiples tablas (INNER, LEFT, RIGHT, FULL JOIN), reordena columnas, aplica funciones de agregación y filtros.
           </p>
         </div>
 
@@ -530,16 +630,19 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
 
       {/* Bloques de Configuración */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* BLOQUE 1: TABLA PRINCIPAL Y COMBINACIÓN JOIN */}
+        {/* BLOQUE 1: TABLA PRINCIPAL Y COMBINACIONES (JOINs) */}
         <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4 text-xs">
-          <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5 border-b border-slate-100 pb-2">
-            <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs">1</span>
-            <span>Tablas y Relaciones</span>
-          </h3>
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs">1</span>
+              <LinkIcon className="w-4 h-4 text-blue-600" />
+              <span>Tablas y Relaciones (JOINs)</span>
+            </h3>
+          </div>
 
           <div>
             <label className="block text-slate-600 font-semibold mb-1">
-              Tabla principal:
+              Tabla principal (FROM):
             </label>
             <select
               value={primaryTable}
@@ -554,44 +657,147 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
             </select>
           </div>
 
-          {/* Detección de Relación FK para INNER JOIN */}
-          {availableJoins.length > 0 ? (
+          {/* Detección de Relaciones FK sugeridas */}
+          {suggestedJoins.length > 0 && (
             <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2">
-              <label className="flex items-center gap-2 cursor-pointer select-none font-semibold text-blue-950">
-                <input
-                  type="checkbox"
-                  checked={enableJoin}
-                  onChange={(e) => setEnableJoin(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-                <LinkIcon className="w-3.5 h-3.5 text-blue-600" />
-                <span>Combinar con tabla relacionada (INNER JOIN)</span>
-              </label>
-
-              {enableJoin && (
-                <div className="pt-1 space-y-1 animate-fade-in">
-                  <label className="block text-[11px] text-blue-800 font-medium">
-                    Relación detectada:
-                  </label>
-                  <select
-                    value={joinFkIndex}
-                    onChange={(e) => setJoinFkIndex(Number(e.target.value))}
-                    className="w-full px-2.5 py-1.5 border border-blue-300 rounded-lg bg-white text-xs font-mono"
+              <span className="font-semibold text-blue-950 text-[11px] block">
+                💡 Relaciones de Clave Foránea detectadas:
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {suggestedJoins.map((sugg, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleAddSuggestedJoin(sugg)}
+                    className="px-2.5 py-1 bg-white hover:bg-blue-100 text-blue-800 border border-blue-300 rounded-lg text-xs font-mono font-medium flex items-center gap-1 transition-colors shadow-2xs"
+                    title={`Agregar JOIN de ${sugg.label}`}
                   >
-                    {availableJoins.map((j, idx) => (
-                      <option key={idx} value={idx}>
-                        {j.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-500 text-[11px] leading-relaxed">
-              No se detectaron relaciones de Clave Foránea directas para esta tabla. Puedes seguir consultándola individualmente.
+                    <Plus className="w-3 h-3 text-blue-600" />
+                    <span>+ JOIN {sugg.toTable} ({sugg.label})</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
+
+          {/* Lista de JOINs activos */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-700 text-xs">
+                Combinaciones con otras tablas:
+              </span>
+              {tables.length > 1 && (
+                <button
+                  type="button"
+                  onClick={handleAddCustomJoin}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold border border-blue-200 rounded-lg transition-colors text-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Agregar JOIN</span>
+                </button>
+              )}
+            </div>
+
+            {joins.length === 0 ? (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-500 text-[11px] leading-relaxed italic">
+                Consulta individual a "{primaryTable}". Haz clic en <strong>+ Agregar JOIN</strong> o en una relación sugerida para combinar múltiples tablas.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {joins.map((j) => {
+                  const fromMeta = getTableInfo(j.fromTable);
+                  const toMeta = getTableInfo(j.toTable);
+
+                  return (
+                    <div
+                      key={j.id}
+                      className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                        {/* Selector tipo de JOIN */}
+                        <select
+                          value={j.joinType}
+                          onChange={(e) => handleUpdateJoin(j.id, 'joinType', e.target.value as JoinType)}
+                          className="px-2 py-1 border border-blue-300 rounded-lg text-xs font-bold font-mono bg-blue-50 text-blue-900"
+                        >
+                          <option value="INNER JOIN">INNER JOIN (Coincidencia exacta)</option>
+                          <option value="LEFT JOIN">LEFT JOIN (Todas las de la izquierda)</option>
+                          <option value="RIGHT JOIN">RIGHT JOIN (Todas las de la derecha)</option>
+                          <option value="FULL JOIN">FULL JOIN (Todas las filas)</option>
+                        </select>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveJoin(j.id)}
+                          className="p-1 text-slate-400 hover:text-red-600 rounded transition-colors ml-auto"
+                          title="Eliminar este JOIN"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Condición ON */}
+                      <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                        <span className="font-mono text-slate-500 text-[11px] font-bold">ON</span>
+
+                        {/* Tabla origen y columna */}
+                        <select
+                          value={j.fromTable}
+                          onChange={(e) => handleUpdateJoin(j.id, 'fromTable', e.target.value)}
+                          className="px-2 py-1 border border-slate-300 rounded-lg text-xs font-mono bg-white min-w-[90px]"
+                        >
+                          {includedTables.map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="text-slate-400 font-mono">.</span>
+                        <select
+                          value={j.fromCol}
+                          onChange={(e) => handleUpdateJoin(j.id, 'fromCol', e.target.value)}
+                          className="px-2 py-1 border border-slate-300 rounded-lg text-xs font-mono bg-white min-w-[90px]"
+                        >
+                          {fromMeta?.columns.map((c) => (
+                            <option key={c.name} value={c.name}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+
+                        <span className="font-bold text-slate-600 font-mono px-0.5">=</span>
+
+                        {/* Tabla destino y columna */}
+                        <select
+                          value={j.toTable}
+                          onChange={(e) => handleUpdateJoin(j.id, 'toTable', e.target.value)}
+                          className="px-2 py-1 border border-slate-300 rounded-lg text-xs font-mono bg-white min-w-[90px]"
+                        >
+                          {tables.map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="text-slate-400 font-mono">.</span>
+                        <select
+                          value={j.toCol}
+                          onChange={(e) => handleUpdateJoin(j.id, 'toCol', e.target.value)}
+                          className="px-2 py-1 border border-slate-300 rounded-lg text-xs font-mono bg-white min-w-[90px]"
+                        >
+                          {toMeta?.columns.map((c) => (
+                            <option key={c.name} value={c.name}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* BLOQUE 2: COLUMNAS A PROYECTAR, REORDENAMIENTO Y FUNCIONES DE AGREGACIÓN */}
@@ -887,13 +1093,12 @@ export const QueryBuilder: React.FC<QueryBuilderProps> = ({
             <div className="space-y-2 max-h-44 overflow-y-auto custom-scrollbar pr-1">
               {havingConditions.map((h) => (
                 <div key={h.id} className="flex items-center gap-1.5 flex-wrap bg-amber-50/50 p-2 rounded-xl border border-amber-200">
-                  {/* Selector o entrada de Expresión Agregada */}
+                  {/* Selector de Expresión Agregada */}
                   <select
                     value={h.expression}
                     onChange={(e) => handleUpdateHavingCondition(h.id, 'expression', e.target.value)}
                     className="px-2 py-1 border border-amber-300 rounded-lg text-xs font-mono bg-white flex-1 min-w-[130px] font-semibold text-amber-900"
                   >
-                    {/* Opciones de expresiones de agregación proyectadas */}
                     <optgroup label="Expresiones recomendadas">
                       {projectedColumns
                         .filter((p) => p.aggregate !== 'NONE')
