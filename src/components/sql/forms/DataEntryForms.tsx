@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useDatabase } from '../../context/DatabaseContext';
-import { SqlValue } from '../../types/database';
+import { useDatabase } from '../../../context/SqlDatabaseContext';
+import { SqlValue } from '../../../types/sql';
 import {
   FileSpreadsheet,
   Plus,

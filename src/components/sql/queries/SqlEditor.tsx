@@ -1,8 +1,8 @@
 import React, { useState, useRef } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { sql } from '@codemirror/lang-sql';
-import { useDatabase } from '../../context/DatabaseContext';
-import { ExecutionResult } from '../../types/database';
+import { useDatabase } from '../../../context/SqlDatabaseContext';
+import { ExecutionResult } from '../../../types/sql';
 import {
   Play,
   RotateCcw,

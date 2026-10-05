@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useDatabase } from '../../context/DatabaseContext';
+import { useDatabase } from '../../../context/SqlDatabaseContext';
 import { EntityWizard } from './EntityWizard';
 import { ViewDdlModal } from './ViewDdlModal';
 import { AddColumnModal } from './AddColumnModal';
@@ -41,7 +41,7 @@ export const EntityDesigner: React.FC = () => {
     setTableToDelete(null);
   };
 
-  // Cargar ejemplo educativo (Carreras y Alumnos con FK)
+  // Cargar ejemplo educativo (Carreras y Alumnos con FK y datos de prueba)
   const handleLoadPreset = () => {
     setActionError(null);
     const sql = `
@@ -59,13 +59,72 @@ export const EntityDesigner: React.FC = () => {
         id_carrera INTEGER NOT NULL,
         FOREIGN KEY (id_carrera) REFERENCES Carreras(id)
       );
+
+      INSERT INTO Carreras (id, nombre, duracion_anios) VALUES
+        (1, 'Ingeniería en Sistemas', 5),
+        (2, 'Licenciatura en Informática', 4),
+        (3, 'Tecnicatura en Programación', 2),
+        (4, 'Diseño Multimedial', 3),
+        (5, 'Ciencia de Datos', 4);
+
+      INSERT INTO Alumnos (id, nombre, email, fecha_ingreso, id_carrera) VALUES
+        (1, 'Lucas González', 'lucas.gonzalez@estudiante.edu.ar', '2022-03-15', 1),
+        (2, 'Valentina Rodríguez', 'valentina.rodriguez@estudiante.edu.ar', '2021-08-10', 1),
+        (3, 'Mateo Fernández', 'mateo.fernandez@estudiante.edu.ar', '2023-03-01', 2),
+        (4, 'Sofía López', 'sofia.lopez@estudiante.edu.ar', '2022-03-15', 3),
+        (5, 'Santiago Martínez', 'santiago.martinez@estudiante.edu.ar', '2024-02-20', 4),
+        (6, 'Camila Pérez', 'camila.perez@estudiante.edu.ar', '2023-08-12', 5),
+        (7, 'Joaquín García', 'joaquin.garcia@estudiante.edu.ar', '2021-03-10', 1),
+        (8, 'Martina Gómez', 'martina.gomez@estudiante.edu.ar', '2022-08-01', 2),
+        (9, 'Benjamin Sánchez', 'benjamin.sanchez@estudiante.edu.ar', '2023-03-15', 3),
+        (10, 'Lucía Díaz', 'lucia.diaz@estudiante.edu.ar', '2024-03-05', 4),
+        (11, 'Felipe Álvarez', 'felipe.alvarez@estudiante.edu.ar', '2022-03-10', 5),
+        (12, 'María Victoria Romero', 'mvictoria.romero@estudiante.edu.ar', '2021-08-15', 1),
+        (13, 'Tomás Sosa', 'tomas.sosa@estudiante.edu.ar', '2023-03-20', 2),
+        (14, 'Emilia Torres', 'emilia.torres@estudiante.edu.ar', '2024-02-18', 3),
+        (15, 'Agustín Ruiz', 'agustin.ruiz@estudiante.edu.ar', '2022-08-10', 4),
+        (16, 'Catalina Ramírez', 'catalina.ramirez@estudiante.edu.ar', '2021-03-12', 5),
+        (17, 'Nicolás Flores', 'nicolas.flores@estudiante.edu.ar', '2023-08-05', 1),
+        (18, 'Delfina Benítez', 'delfina.benitez@estudiante.edu.ar', '2022-03-01', 2),
+        (19, 'Ignacio Acosta', 'ignacio.acosta@estudiante.edu.ar', '2024-03-11', 3),
+        (20, 'Renata Medina', 'renata.medina@estudiante.edu.ar', '2021-08-20', 4),
+        (21, 'Facundo Herrera', 'facundo.herrera@estudiante.edu.ar', '2023-03-15', 5),
+        (22, 'Julieta Castro', 'julieta.castro@estudiante.edu.ar', '2022-03-18', 1),
+        (23, 'Bautista Aguirre', 'bautista.aguirre@estudiante.edu.ar', '2024-02-25', 2),
+        (24, 'Zoe Molina', 'zoe.molina@estudiante.edu.ar', '2021-03-08', 3),
+        (25, 'Thiago Giménez', 'thiago.gimenez@estudiante.edu.ar', '2023-08-14', 4),
+        (26, 'Olivia Morales', 'olivia.morales@estudiante.edu.ar', '2022-08-22', 5),
+        (27, 'Bruno Pereira', 'bruno.pereira@estudiante.edu.ar', '2023-03-02', 1),
+        (28, 'Mía Gutiérrez', 'mia.gutierrez@estudiante.edu.ar', '2021-08-11', 2),
+        (29, 'Gonzalo Suárez', 'gonzalo.suarez@estudiante.edu.ar', '2024-03-01', 3),
+        (30, 'Victoria Santillán', 'victoria.santillan@estudiante.edu.ar', '2022-03-09', 4),
+        (31, 'Manuel Peralta', 'manuel.peralta@estudiante.edu.ar', '2023-08-30', 5),
+        (32, 'Elena Silva', 'elena.silva@estudiante.edu.ar', '2021-03-25', 1),
+        (33, 'Francisco Vega', 'francisco.vega@estudiante.edu.ar', '2024-02-14', 2),
+        (34, 'Juana Rojas', 'juana.rojas@estudiante.edu.ar', '2022-08-19', 3),
+        (35, 'Esteban Navarro', 'esteban.navarro@estudiante.edu.ar', '2023-03-22', 4),
+        (36, 'Abril Córdoba', 'abril.cordoba@estudiante.edu.ar', '2021-08-05', 5),
+        (37, 'Ramiro Luna', 'ramiro.luna@estudiante.edu.ar', '2022-03-14', 1),
+        (38, 'Guadalupe Correa', 'guadalupe.correa@estudiante.edu.ar', '2024-03-08', 2),
+        (39, 'Lautaro Vera', 'lautaro.vera@estudiante.edu.ar', '2023-08-18', 3),
+        (40, 'Josefina Maldonado', 'josefina.maldonado@estudiante.edu.ar', '2021-03-19', 4),
+        (41, 'Iván Domínguez', 'ivan.dominguez@estudiante.edu.ar', '2022-08-27', 5),
+        (42, 'Clara Vázquez', 'clara.vazquez@estudiante.edu.ar', '2023-03-11', 1),
+        (43, 'Marcos Ramos', 'marcos.ramos@estudiante.edu.ar', '2024-02-28', 2),
+        (44, 'Isabella Castillo', 'isabella.castillo@estudiante.edu.ar', '2021-08-14', 3),
+        (45, 'Franco Ortiz', 'franco.ortiz@estudiante.edu.ar', '2022-03-04', 4),
+        (46, 'Alma Núñez', 'alma.nunez@estudiante.edu.ar', '2023-08-21', 5),
+        (47, 'Jeremías Ludueña', 'jeremias.luduena@estudiante.edu.ar', '2021-03-30', 1),
+        (48, 'Lola Godoy', 'lola.godoy@estudiante.edu.ar', '2024-03-12', 2),
+        (49, 'Santino Paz', 'santino.paz@estudiante.edu.ar', '2022-08-16', 3),
+        (50, 'Milagros Villalba', 'milagros.villalba@estudiante.edu.ar', '2023-03-05', 4);
     `;
     const res = exec(sql);
     if (!res.success) {
       setActionError(res.error || 'Error al cargar el esquema de ejemplo.');
     } else {
       refreshTables();
-      setActionSuccess('¡Esquema de ejemplo (Carreras y Alumnos con FK) creado con éxito!');
+      setActionSuccess('¡Esquema de ejemplo (5 carreras y 50 alumnos con FK) creado con éxito!');
       setTimeout(() => setActionSuccess(null), 4000);
     }
   };

@@ -20,7 +20,7 @@ import {
   deleteRecord,
   TableRowData,
   FkOption,
-} from '../lib/database';
+} from '../lib/sql/database';
 import {
   saveDatabaseToIndexedDb,
   saveDatabaseNameToIndexedDb,
@@ -28,8 +28,8 @@ import {
   loadDatabaseNameFromIndexedDb,
   deleteDatabaseFromIndexedDb,
   isValidSqliteHeader,
-} from '../lib/storage';
-import { ExecutionResult, ColumnDefinition, ForeignKeyDefinition, TableDefinition } from '../types/database';
+} from '../lib/sql/storage';
+import { ExecutionResult, ColumnDefinition, ForeignKeyDefinition, TableDefinition } from '../types/sql';
 
 interface DatabaseContextType {
   db: Database | null;

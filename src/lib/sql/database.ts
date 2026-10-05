@@ -1,5 +1,5 @@
 import initSqlJs, { Database, SqlJsStatic } from 'sql.js';
-import { ColumnDefinition, ForeignKeyDefinition, TableDefinition, ExecutionResult, QueryResult, SqlValue } from '../types/database';
+import { ColumnDefinition, ForeignKeyDefinition, TableDefinition, ExecutionResult, QueryResult, SqlValue } from '../../types/sql';
 
 let sqlPromise: Promise<SqlJsStatic> | null = null;
 

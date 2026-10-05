@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { SqliteDataType, ColumnDefinition } from '../../types/database';
-import { useDatabase } from '../../context/DatabaseContext';
+import { SqliteDataType, ColumnDefinition } from '../../../types/sql';
+import { useDatabase } from '../../../context/SqlDatabaseContext';
 import { X, Plus, AlertCircle } from 'lucide-react';
 
 interface AddColumnModalProps {

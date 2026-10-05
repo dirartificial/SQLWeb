@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { SqliteDataType, ColumnDefinition, ForeignKeyDefinition } from '../../types/database';
-import { useDatabase } from '../../context/DatabaseContext';
-import { generateCreateTableSql } from '../../lib/database';
+import { SqliteDataType, ColumnDefinition, ForeignKeyDefinition } from '../../../types/sql';
+import { useDatabase } from '../../../context/SqlDatabaseContext';
+import { generateCreateTableSql } from '../../../lib/sql/database';
 import {
   ArrowLeft,
   ArrowRight,

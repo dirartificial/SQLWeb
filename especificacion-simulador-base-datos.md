@@ -152,3 +152,25 @@ Si se quiere un dashboard tipo el del sistema de quizzes (ver progreso de cada a
 ## 9. Nota para uso con Antigravity
 
 Cada fase de la sección 5 puede pasarse como un prompt independiente al agente, citando la sección correspondiente de este documento (por ejemplo: "implementá el módulo 4.2 tal como está descripto, sobre el proyecto ya existente"). Revisar los artefactos (plan y checklist) que deja el agente antes de aceptar cada cambio, en particular que el DDL generado coincida con lo que se va a explicar en clase.
+
+## 10. Resumen de Estado Actual del Proyecto (Contexto de Sesión)
+
+- **Estado del desarrollo**: 100% Funcional con arquitectura Multi-Paradigma (SQL Relacional + MongoDB NoSQL Documental).
+- **Estructura de Navegación y Router (`src/App.tsx`)**:
+  - `LandingPage` (`src/components/landing/LandingPage.tsx`): Pantalla principal de selección entre Base de Datos Relacional (SQL) y Base de Datos Documental (MongoDB).
+- **Módulo Relacional (SQL)** en `src/components/sql/`:
+  - `entities/`: `EntityDesigner`, `EntityWizard`, `EditEntityModal`, `AddColumnModal`, `ViewDdlModal`.
+  - `forms/`: `DataEntryForms` (Formulario CRUD dinámico con validación y selectores de FK).
+  - `queries/`: `QueriesView`, `QueryBuilder` (SELECT visual con agregaciones/HAVING/JOIN), `SqlEditor` (CodeMirror).
+  - `reports/`: `ReportGenerator` (Informes exportables a PDF).
+  - `database/`: `DatabaseManagerModal` (Gestión multibase, exportación/importación `.sqlite`).
+  - `lib/sql/` & `context/SqlDatabaseContext.tsx`: Motor SQLite WebAssembly (SQL.js) + persistencia IndexedDB.
+- **Módulo Documental (MongoDB NoSQL)** en `src/components/mongo/`:
+  - `collections/`: `CollectionDesigner` (Gestor y visualizador de colecciones/esquemas JSON).
+  - `documents/`: `DocumentCrudForms` (Carga y edición CRUD de documentos JSON).
+  - `queries/`: `MongoQueriesView` (Constructor de Aggregation Pipelines por etapas `$match`, `$group`, `$project`, `$lookup`, `$unwind` con stage previews + editor `mongosh`).
+  - `reports/`: `MongoReportGenerator` (Informes de colecciones exportables a PDF).
+  - `database/`: `MongoDatabaseManagerModal` (Gestión multibase Mongo, exportación/importación de backups `.json`).
+  - `lib/mongo/` & `context/MongoDatabaseContext.tsx`: Motor NoSQL cliente basado en `mingo` + persistencia IndexedDB.
+- **Telemetría Docente**: `src/services/telemetry.ts` y backend PHP en `server/`.
+- **Instrucción de Mantenimiento**: Actualizar esta sección de forma concisa ante cada cambio significativo para preservar el contexto al iniciar nuevos chats.

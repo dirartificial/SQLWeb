@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useDatabase } from '../../context/DatabaseContext';
+import { useDatabase } from '../../../context/SqlDatabaseContext';
 import {
   X,
   Edit2,
@@ -14,7 +14,7 @@ import {
   ArrowDown,
   Save
 } from 'lucide-react';
-import { SqliteDataType, ColumnDefinition } from '../../types/database';
+import { SqliteDataType, ColumnDefinition } from '../../../types/sql';
 
 interface EditEntityModalProps {
   tableName: string;

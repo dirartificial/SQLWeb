@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { useDatabase } from '../../context/DatabaseContext';
+import { useDatabase } from '../../../context/SqlDatabaseContext';
 import {
   X,
   HardDrive,
@@ -18,7 +18,7 @@ import {
   saveTelemetryConfig,
   sendTelemetrySnapshot,
   TelemetryConfig
-} from '../../services/telemetry';
+} from '../../../services/telemetry';
 
 interface DatabaseManagerModalProps {
   isOpen: boolean;

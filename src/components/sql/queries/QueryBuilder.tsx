@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useDatabase } from '../../context/DatabaseContext';
-import { ExecutionResult } from '../../types/database';
+import { useDatabase } from '../../../context/SqlDatabaseContext';
+import { ExecutionResult } from '../../../types/sql';
 import {
   Wand2,
   Play,
